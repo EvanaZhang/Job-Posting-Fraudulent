@@ -33,5 +33,6 @@ XGBoost Modeling & Radom Forest Modeling
 Recommendations
 
 • Based on the key findings, companies should consider to focus on their company logos while posting jobs. They could let someone who’s in charge of job posting check whether they put logos on each job, or for those jobs which had already been posted online, company can check those jobs first of whether logos were posted with the job and make sure there’s no copyright infringement of the logos to avoid fraudulent.
+
 • As a formal release of a legal position, company usually prioritize the level of education required for the job, the necessary work/required experiences, and the detailed information firms’ industry and job function. However, due to there’s too much missing values and the imbalance of the datasets, these variables are not significant enough for helping building the model and impact the rate of fraudulent. Therefore, the company should consider to add more info and focus on these aspects along with the company logos to avoid high possibility of fraudulent.
 
