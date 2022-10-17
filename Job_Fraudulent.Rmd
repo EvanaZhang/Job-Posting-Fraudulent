@@ -1,0 +1,509 @@
+---
+title: "Project3_YifeiZhang"
+author: "Yifei Zhang"
+date: "11/7/2021"
+output: html_document
+---
+# Libraries
+```{r,message=FALSE,warning=FALSE}
+options(yardstick.event_first = FALSE)
+library(tidyverse)
+library(tidymodels)
+library(janitor)
+library(skimr)
+library(vip)
+library(parallel)
+library(doParallel)
+library(embed)
+library(textrecipes)
+library(text2vec)
+library(textdata)
+library(stringr)
+library(tidytext)
+```
+
+# Load in Dataset
+```{r}
+job <- read_csv("job_training.csv") %>% clean_names()
+kaggle <- read_csv("job_holdout.csv") %>% clean_names()
+
+head(job)
+head(kaggle)
+```
+
+# Original Dataset
+```{r}
+job %>% skim()
+#kaggle %>% skim_without_charts()
+```
+
+
+# Target Frequency
+```{r}
+job %>% 
+  group_by(fraudulent) %>% 
+  summarise(n = n()) %>% 
+  mutate(pct = round(n / sum(n),4)) -> fake_pct
+
+fake_pct
+
+fake_pct %>% 
+  ggplot(aes(x = fraudulent, y = pct)) + 
+  geom_col() + 
+  geom_text(aes(label = pct), vjust = -0.5, color = "red") + 
+  labs(title = "Fraud Rate")
+```
+# Explore Relationships (Numeric Variables)
+```{r}
+## -- Does having questions or not impact the Fraudulent?
+job%>%
+  mutate(has_company_logo = as.character(has_company_logo))%>%
+  mutate(fraudulent = as_factor(fraudulent))%>%
+  ggplot(aes(x = has_company_logo)) + 
+  geom_bar(aes(fill = fraudulent), position = "fill") + 
+  coord_flip() +
+  geom_hline(yintercept = 0.0493, color = "red") + 
+  labs(title = "Fraudulent vs. Company Logo")
+
+
+## -- Does having company logo or not impact the Fraudulent?
+job %>% 
+  mutate(has_questions = as.character(has_questions)) %>% 
+  mutate(fraudulent = as_factor(fraudulent)) %>% 
+  ggplot(aes(x = has_questions)) + 
+  geom_bar(aes(fill = fraudulent), position = "fill") + 
+  coord_flip() +
+  geom_hline(yintercept = 0.0493, color = "red") + 
+  labs(title = "Fraudulent vs. Questions")
+
+
+## -- Does Telecommuting impact the Fraudulent? 
+job %>% 
+  mutate(fraudulent = as_factor(fraudulent)) %>% 
+  ggplot(aes(x = telecommuting)) + 
+  geom_bar(aes(fill = fraudulent), position = "fill") + 
+  coord_flip() + 
+  geom_hline(yintercept = 0.0493, color = "red") + 
+  labs(title = "Fraudulent vs. Telecommuting")
+```
+# Categorical Variables
+```{r}
+job %>% 
+  group_by(required_education, fraudulent) %>% 
+  summarise(n = n()) %>% 
+  pivot_wider(names_from = fraudulent, values_from = n, values_fill = 0) %>% 
+  mutate(n = `0` + `1`,
+         pct_GT = round(`1`/n,3)) %>%
+  arrange(desc(pct_GT)) -> frequency
+
+## -- Does Required Education impact the Fraudulent?
+job %>% 
+  group_by(required_education, fraudulent) %>%
+  summarise(n = n()) %>%
+  mutate(pct= n / sum(n)) %>%
+  ggplot(aes(y = reorder(required_education,pct), x = n, fill = fraudulent)) +
+  geom_col(position = "fill") + 
+  geom_vline(xintercept = 0.9507, color = "red") +
+  labs(title = "Required Education vs. Fraudulent") +
+  xlab("Pct") + ylab("Required Education")+
+  coord_flip()
+
+## -- Does Required Experience impact the Fraudulent?
+job %>%
+  group_by(required_experience, fraudulent) %>%
+  summarise(n = n())  %>%
+  pivot_wider(names_from = fraudulent, values_from = n, values_fill=0) %>%
+  mutate(n = `0` + `1`,
+         pct_GT = round(`1`/n,3)) %>%
+  arrange(desc(pct_GT)) -> frequency
+
+job %>% 
+  group_by(required_experience, fraudulent) %>%
+  summarise(n = n()) %>%
+  mutate(pct=n / sum(n)) %>%
+  ggplot(aes(y = reorder(required_experience,pct), x = n, fill = fraudulent)) +
+  geom_col(position = "fill") + 
+  geom_vline(xintercept = 0.9507, color = "red") +
+  labs(title = "Required Experience vs. Fraudulent") +
+  xlab("Pct") + ylab("Required Experience") +
+  coord_flip()
+
+## -- Does Employment Type impact the Fraudulent? 
+job %>% 
+  group_by(employment_type, fraudulent) %>%
+  summarise(n=n())  %>%
+  pivot_wider(names_from = fraudulent, values_from = n, values_fill=0) %>%
+  mutate(n = `0` + `1`,
+         pct_GT = round(`1`/n,3)) %>%
+  arrange(desc(pct_GT)) -> frequency
+
+job %>% 
+  group_by(employment_type, fraudulent) %>%
+  summarise(n = n()) %>%
+  mutate(pct = n/sum(n)) %>%
+  ggplot(aes(y = reorder(employment_type,pct), x = n, fill = fraudulent)) +
+  geom_col(position = "fill") + 
+  geom_vline(xintercept = 0.9507, color = "red")+
+  labs(title = "Employment Type vs. Fraudulent") +
+  xlab("Pct") + ylab("Employment Type") +
+  coord_flip()
+
+## -- Does Salary Range impact the Fraudulent? 
+job %>% 
+  mutate(salary_range = if_else(is.na(salary_range),'NA','Not Na'))%>%
+  group_by(salary_range, fraudulent) %>%
+  summarise(n=n())  %>%
+  pivot_wider(names_from = fraudulent, values_from = n, values_fill=0) %>%
+  mutate(n = `0` + `1`,
+         pct_GT = round(`1`/n,3)) %>%
+  arrange(desc(pct_GT)) -> frequency
+
+job %>% 
+  mutate(salary_range = if_else(is.na(salary_range),'NA','Not Na'))%>%
+  group_by(salary_range, fraudulent) %>%
+  summarise(n=n()) %>%
+  mutate(pct=n/sum(n)) %>%
+  ggplot(aes(y=reorder(salary_range,pct), x=n, fill=fraudulent)) +
+  geom_col(position="fill") + 
+  geom_vline(xintercept = 0.95, color = "red")+
+  labs(title = "salary_range vs. Fraudulent")+
+  xlab("Pct")+
+  ylab("salary_range")+
+  coord_flip()
+
+
+
+```
+# Factor Variables Converting
+```{r}
+job_fraud <- job %>% 
+  mutate_if(is.character,as.factor) %>%
+  mutate(fraudulent = factor(fraudulent),
+         employment_type = factor(employment_type), 
+         telecommuting = factor(telecommuting),
+         has_company_logo = factor(has_company_logo),
+         has_questions = factor(has_questions),
+         required_experience = factor(required_experience), 
+         required_education = factor(required_education), 
+         job_function = factor(job_function))
+```
+
+# Sentiment
+```{r}
+afinn <- get_sentiments("afinn")
+sent <- job_fraud %>% 
+  mutate(description = as.character(description)) %>%
+  unnest_tokens(word, description) %>% 
+  filter(!word %in% stop_words) %>% 
+  inner_join(afinn) %>% 
+  group_by(job_id) %>% 
+  summarise(sentiment_title = sum(value))
+
+job_fraud <- job_fraud %>% 
+  left_join(sent)
+
+```
+# Train/Test Split
+```{r,message=FALSE, warning=FALSE}
+set.seed(43)
+
+train_test_spit<- initial_split(job_fraud, prop = 0.7, strata = fraudulent)
+
+train <- training(train_test_spit)
+test  <- testing(train_test_spit)
+
+sprintf("Train PCT : %1.2f%%", nrow(train)/ nrow(job_fraud) * 100)
+sprintf("Test  PCT : %1.2f%%", nrow(test)/ nrow(job_fraud) * 100)
+
+train_cv_folds <- vfold_cv(train, v=3)
+train_cv_folds
+
+```
+# Recipe & Bake
+```{r}
+job_recipe <- recipe(fraudulent ~ has_company_logo + description  + location + 
+                       sentiment_title, data = train) %>%
+  step_impute_mean(sentiment_title) %>%
+  step_unknown(location,has_company_logo) %>%
+  step_novel(location,has_company_logo ) %>% 
+  step_dummy(has_company_logo ) %>%
+  step_tokenize(location, description) %>%
+  step_stopwords(location, description) %>%
+  step_tokenfilter(location, description, max_tokens = 10) %>%
+  step_tokenfilter(description, min_times = 20) %>%
+  step_tf(location, description)
+
+```
+
+# XGboost
+```{r}
+xgb_model <- boost_tree(
+  trees = 20, 
+  tree_depth = tune(),       
+  min_n = tune(),           
+  learn_rate = tune()
+) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+
+xgb_workflow <- workflow() %>%
+  add_recipe(job_recipe) %>%
+  add_model(xgb_model) 
+
+tune_grid <- grid_random(tree_depth(),
+                          min_n(),
+                          learn_rate(),
+                          size = 10)
+
+print(tune_grid)
+
+xgb_tuning_results <- xgb_workflow %>% 
+  tune_grid(
+    resamples = train_cv_folds,
+    grid = tune_grid,
+    control = control_resamples(save_pred = TRUE)
+    )
+
+xgb_tuning_results
+
+
+# Review the results
+xgb_tuning_results %>%
+  collect_metrics() %>%
+  mutate_if(is.numeric, round,3) %>%
+  pivot_wider(names_from = .metric, values_from=c(mean, std_err))
+
+
+```
+
+# Visualize 
+```{r}
+xgb_tuning_results %>%
+  collect_metrics() %>%
+  mutate_if(is.numeric, round,3) %>%
+  ggplot(aes(learn_rate, mean, )) +
+  geom_line(size = 1.5, alpha = 0.6) +
+  geom_point(size = 2) +
+  facet_wrap(~ .metric, scales = "free", nrow = 2) 
+
+xgb_tuning_results %>%
+  collect_metrics()  %>%
+  mutate_if(is.numeric, round,3) %>%
+  ggplot(aes(min_n, mean, )) +
+  geom_line(size = 1.5, alpha = 0.6) +
+  geom_point(size = 2) +
+  facet_wrap(~ .metric, scales = "free", nrow = 2) 
+
+xgb_tuning_results %>%
+  collect_metrics()  %>%
+  mutate_if(is.numeric, round,3) %>%
+  ggplot(aes(tree_depth, mean, )) +
+  geom_line(size = 1.5, alpha = 0.6) +
+  geom_point(size = 2) +
+  facet_wrap(~ .metric, scales = "free", nrow = 2) 
+
+```
+
+# Pick the Best
+```{r,message=FALSE,warning=FALSE}
+xgb_tuning_results %>%
+  show_best("roc_auc") %>%
+  print()
+
+xgb_best <- xgb_tuning_results %>%
+  select_best("roc_auc") 
+
+print(xgb_best)
+
+xgb_final_wf <- xgb_workflow %>% 
+  finalize_workflow(xgb_best)
+
+print(xgb_final_wf)
+
+xgb_final_fit  <- xgb_final_wf %>%
+  parsnip::fit(data = train) 
+
+```
+
+# Evaluate
+```{r}
+predict(xgb_final_fit, train, type = "prob") %>%
+  bind_cols(predict(xgb_final_fit, train, type="class")) %>%
+  bind_cols(.,train) -> xgb_scored_train 
+
+predict(xgb_final_fit, test, type = "prob") %>%
+    bind_cols(predict(xgb_final_fit,test,type="class")) %>%
+    bind_cols(., test) -> xgb_scored_test   
+
+# -- Metrics: Train and Test 
+xgb_scored_train %>% 
+  metrics(fraudulent, .pred_class) %>%
+  mutate(part="training") %>%
+  bind_rows( xgb_scored_test %>% 
+               metrics(fraudulent, .pred_class) %>%
+               mutate(part="testing") ) %>%
+  pivot_wider(names_from = .metric, values_from=.estimate)
+
+```
+
+
+
+
+# Randome Forest Model
+```{r,warning=FALSE, message=FALSE}
+rf_model <- rand_forest(trees  = tune(), min_n = tune(),) %>% 
+      set_engine("ranger", importance = "impurity") %>% 
+      set_mode("classification")
+
+rf_workflow <- workflow() %>%
+  add_recipe(job_recipe) %>%
+  add_model(rf_model)
+
+tune_grid <- grid_regular(trees(c(100,200)),
+                          min_n(),
+                          levels = 10)
+
+print(tune_grid)
+
+rf_tuning_results <- rf_workflow %>% 
+  tune_grid(
+    resamples = train_cv_folds,
+    grid = tune_grid,
+    control = control_resamples(save_pred = TRUE)
+    )
+
+rf_tuning_results
+```
+
+
+# Review Tuning Results
+# Pick the Best One
+```{r,warning=FALSE}
+rf_tuning_results %>% 
+  collect_metrics() %>%
+  mutate_if(is.numeric, round,3) %>% 
+  pivot_wider(names_from = .metric, values_from=c(mean, std_err)) 
+
+rf_tuning_results %>%
+  show_best("roc_auc") %>%
+  print()
+
+rf_best <- rf_tuning_results %>%
+  select_best("roc_auc") 
+
+print(rf_best)
+
+rf_final_wf <- rf_workflow %>% 
+  finalize_workflow(rf_best) 
+
+print(rf_final_wf)
+
+rf_final_fit  <- rf_final_wf %>%
+  parsnip::fit(data = train) 
+
+```
+
+# Evaluate 
+```{r}
+predict(rf_final_fit, train, type = "prob") %>%
+    bind_cols(predict(rf_final_fit, train, type="class")) %>%
+  bind_cols(.,train)-> rf_scored_train 
+
+predict(rf_final_fit, test, type = "prob") %>%
+    bind_cols(predict(rf_final_fit, test, type="class")) %>%
+     bind_cols(., test) -> rf_scored_test   
+
+# -- Metrics: Train and Test 
+rf_scored_train %>% 
+  metrics(fraudulent, .pred_class) %>%
+  mutate(part="training") %>%
+  bind_rows( rf_scored_test %>% 
+               metrics(fraudulent, .pred_class) %>%
+               mutate(part="testing") ) %>%
+  pivot_wider(names_from = .metric, values_from=.estimate)
+
+## -- Accuracy 
+bind_rows(
+  rf_scored_train %>%
+    mutate(model = "Random Forest Train"),
+  rf_scored_test %>%
+    mutate(model = "Random Forest Test"),
+  xgb_scored_train %>%
+    mutate(model = "Xgboost Train"),
+  xgb_scored_test %>%
+    mutate(model = "Xgboost Test")) %>%
+  group_by(model) %>%
+  metrics(fraudulent, estimate = .pred_class, .pred_1) %>%
+  pivot_wider(id_cols = model, values_from = .estimate, names_from = .metric)
+
+## -- ROC Table
+bind_rows(
+  rf_scored_test %>%
+  mutate(model = "Random Forest"),
+  xgb_scored_test %>%
+  mutate(model = "Xgboost reg")) %>%
+  group_by(model) %>%
+  roc_curve(fraudulent, .pred_1) %>%
+  autoplot() +
+  geom_vline(xintercept=0.1, color="red") +
+  labs(title = "ROC chart")
+```
+
+
+
+
+# Kaggle
+```{r}
+Kaggle<- Kaggle %>% 
+  mutate(employment_type = factor(employment_type), 
+         telecommuting = factor(telecommuting),
+         has_company_logo = factor(has_company_logo),
+         has_questions = factor(has_questions),
+         required_experience = factor(required_experience), 
+         required_education = factor(required_education), 
+         job_function = factor(job_function))
+
+#new_benchmark <- predict(xgb_final_fit,Kaggle, type = "prob") %>%
+ # bind_cols(Kaggle) %>%
+  #dplyr::select(job_id,fraudulent = .pred_1)
+ 
+new_benchmark <- predict(rf_final_fit,Kaggle, type = "prob") %>%
+  bind_cols(Kaggle) %>%
+  dplyr::select(job_id,fraudulent = .pred_1)
+
+head(new_benchmark)
+ 
+ write_csv(new_benchmark,"Kaggle_Predict.csv")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
